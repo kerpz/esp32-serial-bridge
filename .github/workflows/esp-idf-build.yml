@@ -1,0 +1,66 @@
+
+name: ESP-IDF Build & Release
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        idf_version: ["v5.2", "v5.1", "v4.4"]
+        target: ["esp32", "esp32s2"]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget make cmake ninja-build libncurses-dev flex bison gperf python3-pip
+      - name: Install ESP-IDF
+        run: |
+          git clone -b ${{ matrix.idf_version }} --depth 1 https://github.com/espressif/esp-idf.git esp-idf
+          cd esp-idf
+          ./install.sh ${{ matrix.target }}
+        shell: bash
+      - name: Build firmware
+        run: |
+          . ./esp-idf/export.sh
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
+        shell: bash
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.target }}-${{ matrix.idf_version }}
+          path: build/*.bin
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: List downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          ls -R artifacts || true
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Auto Release ${{ github.run_number }}"
+          tag_name: "auto-${{ github.run_number }}"
+          files: "artifacts/**"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
